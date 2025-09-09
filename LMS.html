@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Learning Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app" class="min-h-screen flex flex-col items-center p-4 md:p-8">
+        <!-- Header -->
+        <header class="bg-white shadow-lg rounded-xl p-4 w-full max-w-5xl flex flex-col sm:flex-row justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">LMS Portal</h1>
+            <div id="user-info" class="text-sm text-gray-600 mt-2 sm:mt-0 flex items-center space-x-2">
+                <span id="role-display" class="font-bold text-gray-800"></span>
+                <button id="logout-btn" class="hidden px-3 py-1 text-xs bg-red-500 text-white rounded-full hover:bg-red-600 transition duration-300">
+                    Logout
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main id="main-content" class="bg-white shadow-lg rounded-xl p-6 w-full max-w-5xl flex-grow hidden">
+            <!-- Content will be dynamically injected here -->
+        </main>
+        
+        <!-- Login Screen -->
+        <div id="login-screen" class="bg-white shadow-lg rounded-xl p-6 w-full max-w-md">
+            <h2 class="text-2xl font-semibold mb-4 text-center">Login</h2>
+            <form id="login-form" class="space-y-4">
+                <input type="text" id="username" placeholder="Username" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="password" id="password" placeholder="Password" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button type="submit" class="w-full bg-blue-500 text-white font-bold p-3 rounded-md hover:bg-blue-600 transition duration-300">
+                    Login
+                </button>
+                <p class="text-sm text-gray-500 text-center">Default Admin account: admin/admin123</p>
+            </form>
+        </div>
+
+        <!-- Custom Modal for Alerts -->
+        <div id="modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3 text-center">
+                    <h3 id="modal-title" class="text-lg leading-6 font-medium text-gray-900"></h3>
+                    <div class="mt-2 px-7 py-3">
+                        <p id="modal-body" class="text-sm text-gray-500"></p>
+                    </div>
+                    <div class="items-center px-4 py-3">
+                        <button id="modal-close-btn" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                            OK
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        // --- State Management (in-memory, with localStorage persistence) ---
+        let userRole = null;
+        let currentUser = null;
+        let learningContent = JSON.parse(localStorage.getItem('learningContent')) || [];
+        let tests = JSON.parse(localStorage.getItem('tests')) || [];
+        let users = JSON.parse(localStorage.getItem('users')) || [{ username: 'admin', password: 'admin123', role: 'admin' }];
+        const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB limit for multimedia content
+
+        // --- DOM Elements ---
+        const loginScreen = document.getElementById('login-screen');
+        const loginForm = document.getElementById('login-form');
+        const mainContent = document.getElementById('main-content');
+        const roleDisplay = document.getElementById('role-display');
+        const logoutBtn = document.getElementById('logout-btn');
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalCloseBtn = document.getElementById('modal-close-btn');
+
+        // --- Utility Functions ---
+        const showModal = (title, body) => {
+            modalTitle.innerText = title;
+            modalBody.innerText = body;
+            modal.classList.remove('hidden');
+        };
+
+        modalCloseBtn.onclick = () => {
+            modal.classList.add('hidden');
+        };
+        
+        const saveData = () => {
+            localStorage.setItem('learningContent', JSON.stringify(learningContent));
+            localStorage.setItem('tests', JSON.stringify(tests));
+            localStorage.setItem('users', JSON.stringify(users));
+        };
+        
+        const renderAdminDashboard = () => {
+            mainContent.innerHTML = `
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4 text-center">Admin Dashboard</h2>
+                    
+                    <!-- Content Creation Form -->
+                    <div class="bg-gray-100 p-6 rounded-lg mb-6">
+                        <h3 class="text-xl font-medium mb-4">Add New Learning Content</h3>
+                        <form id="content-form" class="space-y-4">
+                            <input type="text" id="content-title" placeholder="Content Title" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <textarea id="content-body" placeholder="Content Description (e.g., Markdown text)" class="w-full p-2 border border-gray-300 rounded-md h-32 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                            <label class="block text-sm font-medium text-gray-700 mt-2">Upload Multimedia Content (Optional, max 5MB)</label>
+                            <input type="file" id="content-file" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit" class="w-full bg-green-500 text-white font-bold p-3 rounded-md hover:bg-green-600 transition duration-300">Publish Content</button>
+                        </form>
+                    </div>
+
+                    <!-- Test Creation Form -->
+                    <div class="bg-gray-100 p-6 rounded-lg mb-6">
+                        <h3 class="text-xl font-medium mb-4">Create New Test</h3>
+                        <form id="test-form" class="space-y-4">
+                            <input type="text" id="test-title" placeholder="Test Title" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <div id="questions-container" class="space-y-2">
+                                <!-- Questions will be added here -->
+                            </div>
+                            <button type="button" id="add-question-btn" class="w-full bg-blue-500 text-white font-bold p-3 rounded-md hover:bg-blue-600 transition duration-300">Add Question</button>
+                            <button type="submit" class="w-full bg-green-500 text-white font-bold p-3 rounded-md hover:bg-green-600 transition duration-300">Create Test</button>
+                        </form>
+                    </div>
+
+                    <!-- User Management Section -->
+                    <div class="bg-gray-100 p-6 rounded-lg mb-6">
+                        <h3 class="text-xl font-medium mb-4">Create New User</h3>
+                        <form id="user-form" class="space-y-4">
+                            <input type="text" id="new-username" placeholder="New Username" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="password" id="new-password" placeholder="Password" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <select id="new-user-role" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="learner">Learner</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                            <button type="submit" class="w-full bg-indigo-500 text-white font-bold p-3 rounded-md hover:bg-indigo-600 transition duration-300">Create User</button>
+                        </form>
+                        <h3 class="text-xl font-medium mt-6 mb-4">Existing Users</h3>
+                        <div id="user-list" class="space-y-2"></div>
+                    </div>
+
+                    <!-- Content List -->
+                    <div>
+                        <h3 class="text-xl font-medium mb-4">Existing Content</h3>
+                        <div id="content-list" class="space-y-4"></div>
+                    </div>
+
+                </div>
+            `;
+            const contentForm = document.getElementById('content-form');
+            const testForm = document.getElementById('test-form');
+            const questionsContainer = document.getElementById('questions-container');
+            const addQuestionBtn = document.getElementById('add-question-btn');
+            const userForm = document.getElementById('user-form');
+            const userListDiv = document.getElementById('user-list');
+
+            let questionCount = 0;
+            const addQuestionField = () => {
+                questionCount++;
+                const questionHtml = `
+                    <div class="bg-gray-200 p-4 rounded-md">
+                        <input type="text" placeholder="Question ${questionCount}" name="question-${questionCount}" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2">
+                        <div class="flex flex-col space-y-2">
+                            <input type="text" placeholder="Option A" name="option-${questionCount}-A" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="text" placeholder="Option B" name="option-${questionCount}-B" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="text" placeholder="Option C" name="option-${questionCount}-C" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="text" placeholder="Correct Answer (e.g., A)" name="correct-${questionCount}" class="w-full p-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+                `;
+                questionsContainer.insertAdjacentHTML('beforeend', questionHtml);
+            };
+
+            const renderContentList = () => {
+                const contentListDiv = document.getElementById('content-list');
+                contentListDiv.innerHTML = '';
+                if (learningContent.length === 0) {
+                    contentListDiv.innerHTML = '<p class="text-center text-gray-500">No content available yet.</p>';
+                } else {
+                    learningContent.forEach((content) => {
+                        const contentItem = document.createElement('div');
+                        contentItem.className = "bg-white border border-gray-200 rounded-md p-4";
+                        contentItem.innerHTML = `
+                            <h4 class="text-lg font-semibold">${content.title}</h4>
+                            <p class="text-sm text-gray-700 mt-1">${content.body}</p>
+                        `;
+                        contentListDiv.appendChild(contentItem);
+                    });
+                }
+            };
+
+            const renderUserList = () => {
+                userListDiv.innerHTML = '';
+                if (users.length === 0) {
+                    userListDiv.innerHTML = '<p class="text-center text-gray-500">No users created yet.</p>';
+                } else {
+                    users.forEach(user => {
+                        const userItem = document.createElement('div');
+                        userItem.className = 'flex justify-between items-center p-2 rounded-md bg-white border border-gray-200';
+                        userItem.innerHTML = `
+                            <span>${user.username}</span>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs font-semibold text-gray-500">${user.role}</span>
+                                <button data-username="${user.username}" class="delete-user-btn px-2 py-1 bg-red-500 text-white text-xs rounded-md hover:bg-red-600 transition-colors duration-200">Delete</button>
+                            </div>
+                        `;
+                        userListDiv.appendChild(userItem);
+                    });
+                }
+                document.querySelectorAll('.delete-user-btn').forEach(button => {
+                    button.onclick = (e) => {
+                        const usernameToDelete = e.target.dataset.username;
+                        handleUserDeletion(usernameToDelete);
+                    };
+                });
+            };
+
+            const handleUserDeletion = (usernameToDelete) => {
+                if (usernameToDelete === currentUser) {
+                    showModal('Deletion Failed', "You cannot delete your own account.");
+                    return;
+                }
+                const admins = users.filter(u => u.role === 'admin');
+                if (admins.length === 1 && admins[0].username === usernameToDelete) {
+                    showModal('Deletion Failed', "Cannot delete the last admin account.");
+                    return;
+                }
+
+                users = users.filter(user => user.username !== usernameToDelete);
+                saveData();
+                renderUserList();
+                showModal('User Deleted', `User "${usernameToDelete}" has been successfully deleted.`);
+            };
+
+            addQuestionBtn.onclick = addQuestionField;
+
+            contentForm.onsubmit = (e) => {
+                e.preventDefault();
+                const title = document.getElementById('content-title').value;
+                const body = document.getElementById('content-body').value;
+                const fileInput = document.getElementById('content-file');
+                const file = fileInput.files[0];
+
+                if (!title && !file) {
+                    showModal('Error', 'Please provide a title and either text content or a file.');
+                    return;
+                }
+
+                if (file) {
+                    if (file.size > MAX_FILE_SIZE) {
+                        showModal('Error', `File size exceeds the 5MB limit. Please choose a smaller file.`);
+                        return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const content = {
+                            title: title || file.name,
+                            body: body,
+                            mediaUrl: event.target.result,
+                            mediaType: file.type,
+                            createdAt: new Date()
+                        };
+                        learningContent.push(content);
+                        saveData();
+                        showModal('Success', 'Multimedia content uploaded successfully!');
+                        contentForm.reset();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    learningContent.push({ title, body, mediaUrl: null, mediaType: 'text', createdAt: new Date() });
+                    saveData();
+                    showModal('Success', 'Content published successfully!');
+                    contentForm.reset();
+                }
+            };
+
+            testForm.onsubmit = (e) => {
+                e.preventDefault();
+                const testTitle = document.getElementById('test-title').value;
+                const questions = [];
+                for (let i = 1; i <= questionCount; i++) {
+                    const questionText = testForm.querySelector(`[name="question-${i}"]`).value;
+                    const options = {
+                        A: testForm.querySelector(`[name="option-${i}-A"]`).value,
+                        B: testForm.querySelector(`[name="option-${i}-B"]`).value,
+                        C: testForm.querySelector(`[name="option-${i}-C"]`).value
+                    };
+                    const correct = testForm.querySelector(`[name="correct-${i}"]`).value;
+                    if (!questionText || !options.A || !options.B || !options.C || !correct) {
+                        showModal('Error', 'Please fill in all question fields.');
+                        return;
+                    }
+                    questions.push({ questionText, options, correct });
+                }
+                if (questions.length === 0) {
+                    showModal('Error', 'Please add at least one question.');
+                    return;
+                }
+                tests.push({ title: testTitle, questions, createdAt: new Date() });
+                testForm.reset();
+                questionsContainer.innerHTML = '';
+                questionCount = 0;
+                saveData();
+                showModal('Success', 'Test created successfully!');
+            };
+
+            userForm.onsubmit = (e) => {
+                e.preventDefault();
+                const newUsername = document.getElementById('new-username').value;
+                const newPassword = document.getElementById('new-password').value;
+                const newUserRole = document.getElementById('new-user-role').value;
+                
+                if (!newUsername || !newPassword) {
+                    showModal('Error', 'Please enter a username and password.');
+                    return;
+                }
+                const userExists = users.some(u => u.username === newUsername);
+                if (userExists) {
+                    showModal('Error', 'Username already exists.');
+                    return;
+                }
+
+                users.push({ username: newUsername, password: newPassword, role: newUserRole });
+                userForm.reset();
+                renderUserList();
+                saveData();
+                showModal('Success', `User "${newUsername}" created successfully!`);
+            };
+
+            renderContentList();
+            renderUserList();
+        };
+
+        const renderLearnerDashboard = () => {
+            mainContent.innerHTML = `
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4 text-center">Learner Dashboard</h2>
+                    
+                    <!-- Learning Content Section -->
+                    <div class="mb-6">
+                        <h3 class="text-xl font-medium mb-4">Available Content</h3>
+                        <div id="content-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    </div>
+
+                    <!-- Tests Section -->
+                    <div>
+                        <h3 class="text-xl font-medium mb-4">Available Tests</h3>
+                        <div id="test-list" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    </div>
+
+                    <div id="test-view" class="hidden">
+                        <h3 id="test-view-title" class="text-2xl font-semibold mb-4 text-center"></h3>
+                        <form id="quiz-form" class="space-y-4"></form>
+                        <button id="submit-quiz-btn" class="w-full bg-blue-500 text-white font-bold p-3 rounded-md hover:bg-blue-600 transition duration-300 mt-4">Submit Test</button>
+                        <button id="back-to-dashboard-btn" class="w-full bg-gray-300 text-gray-700 font-bold p-3 rounded-md hover:bg-gray-400 transition duration-300 mt-2">Back to Dashboard</button>
+                    </div>
+
+                </div>
+            `;
+            const testViewDiv = document.getElementById('test-view');
+            const quizForm = document.getElementById('quiz-form');
+            const submitQuizBtn = document.getElementById('submit-quiz-btn');
+            const backToDashboardBtn = document.getElementById('back-to-dashboard-btn');
+            
+            let currentTest = null;
+
+            const renderContentAndTests = () => {
+                const contentListDiv = document.getElementById('content-list');
+                contentListDiv.innerHTML = '';
+                if (learningContent.length === 0) {
+                    contentListDiv.innerHTML = '<p class="text-center text-gray-500 col-span-2">No content available yet.</p>';
+                } else {
+                    learningContent.forEach((content) => {
+                        const contentItem = document.createElement('div');
+                        contentItem.className = "bg-white border border-gray-200 rounded-md p-4 shadow-sm";
+                        let mediaHtml = '';
+                        if (content.mediaUrl) {
+                            if (content.mediaType.startsWith('image/')) {
+                                mediaHtml = `<img src="${content.mediaUrl}" class="rounded-md mt-2 w-full h-auto object-cover">`;
+                            } else if (content.mediaType.startsWith('video/')) {
+                                mediaHtml = `<video src="${content.mediaUrl}" controls class="rounded-md mt-2 w-full h-auto"></video>`;
+                            } else if (content.mediaType.startsWith('audio/')) {
+                                mediaHtml = `<audio src="${content.mediaUrl}" controls class="rounded-md mt-2 w-full h-auto"></audio>`;
+                            }
+                        }
+                        contentItem.innerHTML = `
+                            <h4 class="text-lg font-semibold text-blue-600">${content.title}</h4>
+                            <p class="text-sm text-gray-700 mt-1">${content.body}</p>
+                            ${mediaHtml}
+                        `;
+                        contentListDiv.appendChild(contentItem);
+                    });
+                }
+                
+                const testListDiv = document.getElementById('test-list');
+                testListDiv.innerHTML = '';
+                if (tests.length === 0) {
+                    testListDiv.innerHTML = '<p class="text-center text-gray-500 col-span-2">No tests available yet.</p>';
+                } else {
+                    tests.forEach((test) => {
+                        const testItem = document.createElement('div');
+                        testItem.className = "bg-white border border-gray-200 rounded-md p-4 shadow-sm cursor-pointer hover:bg-gray-50 transition duration-300";
+                        testItem.innerHTML = `
+                            <h4 class="text-lg font-semibold text-blue-600">${test.title}</h4>
+                            <p class="text-sm text-gray-700 mt-1">${test.questions.length} questions</p>
+                        `;
+                        testItem.onclick = () => startTest(test);
+                        testListDiv.appendChild(testItem);
+                    });
+                }
+            };
+            
+            const startTest = (test) => {
+                currentTest = test;
+                document.getElementById('test-view-title').innerText = test.title;
+                testViewDiv.classList.remove('hidden');
+                document.getElementById('content-list').parentElement.classList.add('hidden');
+                document.getElementById('test-list').parentElement.classList.add('hidden');
+                quizForm.innerHTML = '';
+                test.questions.forEach((q, index) => {
+                    const qDiv = document.createElement('div');
+                    qDiv.className = "bg-gray-100 p-4 rounded-md";
+                    qDiv.innerHTML = `
+                        <p class="font-medium text-lg mb-2">${index + 1}. ${q.questionText}</p>
+                        <div class="space-y-2">
+                            <label class="block"><input type="radio" name="q-${index}" value="A" class="mr-2">${q.options.A}</label>
+                            <label class="block"><input type="radio" name="q-${index}" value="B" class="mr-2">${q.options.B}</label>
+                            <label class="block"><input type="radio" name="q-${index}" value="C" class="mr-2">${q.options.C}</label>
+                        </div>
+                    `;
+                    quizForm.appendChild(qDiv);
+                });
+            };
+
+            const submitTest = (e) => {
+                e.preventDefault();
+                let score = 0;
+                let total = currentTest.questions.length;
+                currentTest.questions.forEach((q, index) => {
+                    const selected = quizForm.querySelector(`input[name="q-${index}"]:checked`);
+                    if (selected && selected.value === q.correct) {
+                        score++;
+                    }
+                });
+                showModal('Test Submitted!', `You scored ${score} out of ${total}!`);
+            };
+            
+            submitQuizBtn.onclick = submitTest;
+            backToDashboardBtn.onclick = () => {
+                testViewDiv.classList.add('hidden');
+                document.getElementById('content-list').parentElement.classList.remove('hidden');
+                document.getElementById('test-list').parentElement.classList.remove('hidden');
+            };
+            
+            renderContentAndTests();
+        };
+        
+        // --- Main App Logic ---
+        const renderDashboard = (username) => {
+            loginScreen.classList.add('hidden');
+            mainContent.classList.remove('hidden');
+            logoutBtn.classList.remove('hidden');
+            currentUser = username;
+
+            if (userRole === 'admin') {
+                roleDisplay.innerText = `Logged in as: Admin (${username})`;
+                renderAdminDashboard();
+            } else {
+                roleDisplay.innerText = `Logged in as: Learner (${username})`;
+                renderLearnerDashboard();
+            }
+        };
+
+        loginForm.onsubmit = (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            const user = users.find(u => u.username === username && u.password === password);
+
+            if (user) {
+                userRole = user.role;
+                localStorage.setItem('userRole', user.role);
+                localStorage.setItem('currentUser', username);
+                renderDashboard(username);
+            } else {
+                showModal('Login Failed', 'Invalid username or password.');
+            }
+        };
+
+        logoutBtn.onclick = () => {
+            userRole = null;
+            currentUser = null;
+            localStorage.removeItem('userRole');
+            localStorage.removeItem('currentUser');
+            location.reload(); // Simple way to reset the app to login screen
+        };
+
+        // Initial render based on local storage
+        const storedRole = localStorage.getItem('userRole');
+        const storedUser = localStorage.getItem('currentUser');
+        if (storedRole && storedUser) {
+            userRole = storedRole;
+            renderDashboard(storedUser);
+        }
+    </script>
+</body>
+</html>
